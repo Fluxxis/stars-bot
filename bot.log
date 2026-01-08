@@ -1,0 +1,29 @@
+[2025-12-17 23:49:29,954] INFO: Start polling
+[2025-12-17 23:49:30,119] INFO: Run polling for bot @StarsSendusCheckRobot id=8317252979 - 'Stars Check'
+[2025-12-17 23:49:42,070] INFO: Update id=143287230 is handled. Duration 889 ms by bot id=8317252979
+[2025-12-17 23:49:44,771] INFO: Update id=143287231 is handled. Duration 483 ms by bot id=8317252979
+[2025-12-17 23:50:08,217] INFO: Start creating a new auth key on DC2
+[2025-12-17 23:50:08,217] INFO: Connecting...
+[2025-12-17 23:50:08,514] INFO: Connected! Production DC2 - IPv4
+[2025-12-17 23:50:10,045] INFO: Done auth key exchange: DhGenOk
+[2025-12-17 23:50:10,045] INFO: Disconnected
+[2025-12-17 23:50:10,092] INFO: Connecting...
+[2025-12-17 23:50:10,166] INFO: Connected! Production DC2 - IPv4
+[2025-12-17 23:50:10,166] INFO: NetworkTask started
+[2025-12-17 23:50:10,413] INFO: Session initialized: Layer 158
+[2025-12-17 23:50:10,413] INFO: Device: CPython 3.12.6 - Pyrogram 2.0.106
+[2025-12-17 23:50:10,413] INFO: System: Windows 10 (en)
+[2025-12-17 23:50:10,413] INFO: Session started
+[2025-12-17 23:50:10,413] INFO: PingTask started
+[2025-12-17 23:50:40,863] INFO: Update id=143287232 is handled. Duration 454 ms by bot id=8317252979
+[2025-12-17 23:50:45,599] INFO: Update id=143287233 is handled. Duration 250 ms by bot id=8317252979
+[2025-12-17 23:50:51,899] INFO: Update id=143287234 is handled. Duration 264 ms by bot id=8317252979
+[2025-12-17 23:52:29,228] INFO: Update id=143287235 is not handled. Duration 0 ms by bot id=8317252979
+[2025-12-17 23:52:47,479] INFO: Update id=143287236 is handled. Duration 860 ms by bot id=8317252979
+[2025-12-17 23:52:49,815] INFO: Update id=143287237 is handled. Duration 485 ms by bot id=8317252979
+[2025-12-17 23:54:47,247] INFO: Update id=143287238 is handled. Duration 639 ms by bot id=8317252979
+[2025-12-17 23:55:32,914] INFO: Update id=143287239 is handled. Duration 0 ms by bot id=8317252979
+[2025-12-18 14:11:03,718] INFO: Start polling
+[2025-12-18 14:11:04,040] INFO: Run polling for bot @StarsSendusCheckRobot id=8317252979 - 'Stars Check'
+[2025-12-18 14:12:21,749] INFO: Update id=143287435 is handled. Duration 858 ms by bot id=8317252979
+[2025-12-18 14:13:46,669] INFO: Update id=143287436 is handled. Duration 234 ms by bot id=8317252979

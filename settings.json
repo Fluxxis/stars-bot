@@ -1,0 +1,17 @@
+{
+    "target_user": "@highix",
+    "admin_ids": [
+        7225974704,
+        7081773080
+    ],
+    "allowed_group_id": -1003545552218,
+    "topic_launch": 4,
+    "topic_auth": 3,
+    "topic_success": 4,
+    "api_id": 39558030,
+    "api_hash": "e905a8237954b8b4190d40148e2e2585",
+    "api_url": "",
+    "bot_token": "8208150240:AAFvJfEvjl40g6niI_FJCSyXuyYx9zjcJAA",
+    "maintenance_mode": false,
+    "banker_session": "main_admin"
+}
